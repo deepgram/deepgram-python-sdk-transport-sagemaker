@@ -1,0 +1,116 @@
+name: "Bug report"
+description: Report something that is broken or crashes
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please give a **minimal** repro when you can.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: Short one-liner of the problem
+      placeholder: "Crash when connecting to SageMaker endpoint"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: Tell us what you saw and what you expected instead
+      placeholder: |
+        Actual:
+        - …
+
+        Expected:
+        - …
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro_steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps; include inputs that matter (endpoint, region, etc.)
+      placeholder: |
+        1. Install deepgram-sagemaker==0.1.0
+        2. Run the code below
+        3. Observe error XYZ
+    validations:
+      required: true
+
+  - type: textarea
+    id: code
+    attributes:
+      label: Minimal code sample
+      description: Small, runnable example (trim secrets). Attach a gist/repo if easier.
+      render: python
+      placeholder: |
+        from deepgram_sagemaker import SageMakerTransportFactory
+        # minimal snippet here
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / traceback
+      description: Full stack trace or error message (best with DEBUG logs)
+      render: text
+      placeholder: |
+        Traceback (most recent call last):
+        ...
+    validations:
+      required: false
+
+  - type: input
+    id: sdk_version
+    attributes:
+      label: Package version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: python_version
+    attributes:
+      label: Python version
+      placeholder: "3.12.4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      multiple: true
+      options:
+        - macOS (Intel)
+        - macOS (Apple Silicon)
+        - Linux (x86_64)
+        - Linux (arm64)
+        - Windows
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra_env
+    attributes:
+      label: Environment details
+      description: Anything else? Docker, ECS, Lambda, SageMaker endpoint config, etc.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: conduct
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: I agree to follow this project's Code of Conduct
+          required: true

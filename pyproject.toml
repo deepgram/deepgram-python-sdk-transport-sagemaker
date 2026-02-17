@@ -1,0 +1,63 @@
+[project]
+name = "deepgram-sagemaker"
+dynamic = ["version"]
+
+[tool.poetry]
+name = "deepgram-sagemaker"
+version = "0.1.0"
+description = "SageMaker transport for the Deepgram Python SDK"
+readme = "README.md"
+authors = []
+keywords = ["deepgram", "sagemaker", "speech-recognition", "transcription"]
+license = "MIT"
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+    "License :: OSI Approved :: MIT License"
+]
+packages = [
+    { include = "deepgram_sagemaker", from = "src" }
+]
+
+[tool.poetry.urls]
+Repository = 'https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker'
+
+[tool.poetry.dependencies]
+python = "^3.12"
+aws-sdk-sagemaker-runtime-http2 = "*"
+boto3 = "*"
+
+[tool.poetry.group.dev.dependencies]
+mypy = "==1.13.0"
+pytest = "^7.4.0"
+pytest-asyncio = "^0.23.5"
+ruff = "==0.11.5"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "F",  # pyflakes
+    "I",  # isort
+]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

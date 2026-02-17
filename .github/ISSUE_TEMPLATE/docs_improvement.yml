@@ -1,0 +1,38 @@
+name: "Docs improvement"
+description: Fix or improve documentation, examples, or comments
+title: "[Docs]: "
+labels: ["documentation", "needs-triage"]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Affected page or section
+      placeholder: "README.md or https://…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: issue
+    attributes:
+      label: What is unclear or wrong?
+      placeholder: "Code sample fails with 0.1.0; missing info about credential setup"
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested change
+      render: markdown
+      placeholder: "Replace snippet with… Add note about…"
+    validations:
+      required: false
+
+  - type: textarea
+    id: example
+    attributes:
+      label: Example code (if any)
+      render: python
+      placeholder: "# short snippet"
+    validations:
+      required: false

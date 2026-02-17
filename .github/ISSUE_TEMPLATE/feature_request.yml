@@ -1,0 +1,53 @@
+name: "Feature request"
+description: Suggest a new capability or API
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      placeholder: "Add support for custom SageMaker endpoint URLs"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What user problem does this address?
+      placeholder: "Today I need to…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: API shape, flags, defaults. Keep it simple.
+      render: python
+      placeholder: |
+        # Example
+        factory = SageMakerTransportFactory(
+            endpoint_name="my-endpoint",
+            region="us-west-2",
+            custom_option=True,
+        )
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      placeholder: "Manual HTTP/2 client; different config approach; do nothing"
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra context / links
+      placeholder: "Related issues, forum threads, benchmarks, etc."
+    validations:
+      required: false
