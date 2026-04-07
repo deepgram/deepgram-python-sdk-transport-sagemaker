@@ -180,7 +180,12 @@ class SageMakerTransport:
         else:
             raw = str(data).encode("utf-8")
 
-        payload = RequestPayloadPart(bytes_=raw)
+        # Set data_type so the SageMaker shim delivers text as a WebSocket
+        # text frame (required for TTS Speak/Flush/Close messages).
+        if isinstance(data, str) or isinstance(data, dict):
+            payload = RequestPayloadPart(bytes_=raw, data_type="UTF8")
+        else:
+            payload = RequestPayloadPart(bytes_=raw)
         event = RequestStreamEventPayloadPart(value=payload)
         await self._stream.input_stream.send(event)
 
@@ -199,10 +204,11 @@ class SageMakerTransport:
 
         if result.value and result.value.bytes_:
             raw = result.value.bytes_
-            try:
+            # JSON messages start with '{"' — return as string for the SDK
+            # to parse. Everything else is binary (e.g. TTS audio).
+            if len(raw) > 1 and raw[0:1] == b'{' and raw[1:2] == b'"':
                 return raw.decode("utf-8")
-            except UnicodeDecodeError:
-                return raw
+            return raw
 
         return None
 
