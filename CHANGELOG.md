@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/compare/v0.2.1...v0.2.2) (2026-04-09)
+
+
+### Bug Fixes
+
+* live mic example display issues ([#4](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/issues/4)) ([150217a](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/commit/150217a0db84e768b50295b543f68ddf09991335))
+
 ## [0.2.1](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/compare/v0.2.0...v0.2.1) (2026-04-07)
 
 
