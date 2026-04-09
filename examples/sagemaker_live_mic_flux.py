@@ -63,10 +63,10 @@ async def main():
                 transcript = turn_info.transcript
                 event = turn_info.event
                 if transcript:
-                    if str(event) == "end_of_turn":
-                        print(transcript)
+                    if str(event) == "EndOfTurn":
+                        print(f"\033[2K\r{transcript}")
                     else:
-                        print(f"\r  ... {transcript}", end="", flush=True)
+                        print(f"\033[2K\r  ... {transcript}", end="", flush=True)
             except Exception:
                 pass
 

@@ -69,9 +69,9 @@ async def main():
                     if transcript:
                         is_final = getattr(message, "is_final", False)
                         if is_final:
-                            print(transcript)
+                            print(f"\033[2K\r{transcript}")
                         else:
-                            print(f"\r  ... {transcript}", end="", flush=True)
+                            print(f"\033[2K\r  ... {transcript}", end="", flush=True)
             except Exception:
                 pass
 
