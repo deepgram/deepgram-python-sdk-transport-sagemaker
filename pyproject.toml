@@ -4,7 +4,7 @@ dynamic = ["version"]
 
 [tool.poetry]
 name = "deepgram-sagemaker"
-version = "0.2.1"
+version = "0.2.2"
 description = "SageMaker transport for the Deepgram Python SDK"
 readme = "README.md"
 authors = []
