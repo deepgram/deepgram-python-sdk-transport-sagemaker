@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/compare/v0.2.2...v0.3.0) (2026-06-01)
+
+
+### Features
+
+* configurable timeouts and storm absorption for high-burst workloads ([#6](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/issues/6)) ([f2925fc](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/commit/f2925fcea84f8575a20cb30f0bef818b4c9b262d))
+
 ## [0.2.2](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/compare/v0.2.1...v0.2.2) (2026-04-09)
 
 
