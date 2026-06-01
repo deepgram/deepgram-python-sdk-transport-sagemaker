@@ -4,7 +4,11 @@ import asyncio
 
 import pytest
 
-from deepgram_sagemaker import SageMakerTransport, SageMakerTransportFactory
+from deepgram_sagemaker import (
+    SageMakerConfig,
+    SageMakerTransport,
+    SageMakerTransportFactory,
+)
 
 
 class TestSageMakerTransportFactory:
@@ -58,6 +62,31 @@ class TestSageMakerTransportFactory:
         with pytest.raises(TypeError, match="async-only"):
             factory("wss://host/v1/listen", {})
 
+    def test_factory_accepts_config(self):
+        """Factory accepts a fully-built SageMakerConfig via the config= keyword."""
+        cfg = SageMakerConfig(
+            endpoint_name="custom-ep",
+            region="us-east-2",
+            connection_timeout=5.0,
+            subscription_timeout=15.0,
+        )
+        factory = SageMakerTransportFactory(config=cfg)
+        assert factory.endpoint_name == "custom-ep"
+        assert factory.region == "us-east-2"
+        assert factory.config.connection_timeout == 5.0
+        assert factory.config.subscription_timeout == 15.0
+
+    def test_factory_rejects_config_mixed_with_shortcut(self):
+        """Mixing config= with endpoint_name=/region= is rejected to avoid ambiguity."""
+        cfg = SageMakerConfig(endpoint_name="from-config")
+        with pytest.raises(ValueError, match="not both"):
+            SageMakerTransportFactory("from-shortcut", config=cfg)
+
+    def test_factory_requires_endpoint(self):
+        """Factory without endpoint_name and without config raises TypeError."""
+        with pytest.raises(TypeError, match="endpoint_name is required"):
+            SageMakerTransportFactory()
+
 
 class TestSageMakerTransportInit:
     """Tests for SageMakerTransport initialization (no connection)."""
@@ -65,8 +94,7 @@ class TestSageMakerTransportInit:
     def test_initial_state(self):
         """Transport starts disconnected and not closed."""
         transport = SageMakerTransport(
-            endpoint_name="ep",
-            region="us-west-2",
+            config=SageMakerConfig(endpoint_name="ep"),
             invocation_path="v1/listen",
             query_string="model=nova-3",
         )
@@ -77,8 +105,7 @@ class TestSageMakerTransportInit:
     async def test_close_idempotent(self):
         """Calling close() multiple times is safe."""
         transport = SageMakerTransport(
-            endpoint_name="ep",
-            region="us-west-2",
+            config=SageMakerConfig(endpoint_name="ep"),
             invocation_path="v1/listen",
             query_string="",
         )
@@ -91,10 +118,11 @@ class TestExports:
     """Tests for package-level exports."""
 
     def test_public_exports(self):
-        """Package exports SageMakerTransport and SageMakerTransportFactory."""
+        """Package exports SageMakerConfig, SageMakerTransport, and SageMakerTransportFactory."""
         import deepgram_sagemaker
 
+        assert hasattr(deepgram_sagemaker, "SageMakerConfig")
         assert hasattr(deepgram_sagemaker, "SageMakerTransport")
         assert hasattr(deepgram_sagemaker, "SageMakerTransportFactory")
-        assert "SageMakerTransport" in deepgram_sagemaker.__all__
-        assert "SageMakerTransportFactory" in deepgram_sagemaker.__all__
+        for name in ("SageMakerConfig", "SageMakerTransport", "SageMakerTransportFactory"):
+            assert name in deepgram_sagemaker.__all__
