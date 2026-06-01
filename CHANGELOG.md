@@ -2,10 +2,12 @@
 
 ## [0.3.0](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/compare/v0.2.2...v0.3.0) (2026-06-01)
 
+High-burst hardening: a configurable `SageMakerConfig` plus internal storm absorption, so transient AWS-side failures are retried inside the transport instead of surfacing to callers. Backwards-compatible — existing `SageMakerTransportFactory(endpoint_name=..., region=...)` callers keep working and pick up the new lenient defaults.
+
 
 ### Features
 
-* configurable timeouts and storm absorption for high-burst workloads ([#6](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/issues/6)) ([f2925fc](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/commit/f2925fcea84f8575a20cb30f0bef818b4c9b262d))
+* **transport:** configurable timeouts and storm absorption for high-burst workloads. New `SageMakerConfig` dataclass exposes tunable `connection_timeout` (30s, up from the AWS client's ~2s), `connection_acquire_timeout` (60s), `subscription_timeout` (60s), `max_concurrency` (500), and a retry stack: `max_retries` (5; `0` disables), full-jitter exponential backoff (`initial_backoff` / `max_backoff` / `backoff_multiplier`), a `retry_budget` (30s) ceiling, and an 8 MiB replay buffer (`max_replay_buffer_bytes`; `0` disables). The transport now absorbs transient AWS-side failures internally — the retry classifier defaults to RETRYABLE and treats 429 throttling and 424 `ModelError` as transient under burst, replays unacked events onto a fresh bidi stream so audio isn't lost on reset, and resets retry counters only on real downstream payloads (not Metadata/Error). Also adds whitespace-tolerant user-close detection for `listen.v1`/`v2` (`CloseStream` / `Finalize`) and `speak.v1` (`Close`) to stop post-completion retry storms. Pass `config=SageMakerConfig(...)` to tune. Mirrors the storm-absorption design in the Java transport; validated end-to-end against live Nova-3, Flux, and Aura endpoints at up to 400 concurrent connections ([#6](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/issues/6)) ([f2925fc](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/commit/f2925fcea84f8575a20cb30f0bef818b4c9b262d))
 
 ## [0.2.2](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/compare/v0.2.1...v0.2.2) (2026-04-09)
 
