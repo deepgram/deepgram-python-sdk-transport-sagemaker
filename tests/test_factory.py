@@ -41,6 +41,34 @@ class TestSageMakerTransportFactory:
 
         asyncio.run(_run())
 
+    def test_factory_routes_speak_v2(self):
+        """Flux TTS (speak.v2) routes to v2/speak with no transport-specific code."""
+        factory = SageMakerTransportFactory("flux-tts-endpoint", region="us-east-2")
+
+        async def _run():
+            transport = factory(
+                "wss://api.deepgram.com/v2/speak"
+                "?model=flux-alexis-en&encoding=linear16&sample_rate=24000",
+                {},
+            )
+            assert transport.invocation_path == "v2/speak"
+            assert transport.query_string == (
+                "model=flux-alexis-en&encoding=linear16&sample_rate=24000"
+            )
+
+        asyncio.run(_run())
+
+    def test_factory_routes_all_streaming_surfaces(self):
+        """The transport is path-agnostic -- every SDK connect() surface routes."""
+        factory = SageMakerTransportFactory("ep")
+
+        async def _run():
+            for path in ("v1/listen", "v2/listen", "v1/speak", "v2/speak"):
+                transport = factory(f"wss://api.deepgram.com/{path}?model=m", {})
+                assert transport.invocation_path == path
+
+        asyncio.run(_run())
+
     def test_factory_handles_no_query_string(self):
         """Factory handles URLs with no query parameters."""
         factory = SageMakerTransportFactory("ep")

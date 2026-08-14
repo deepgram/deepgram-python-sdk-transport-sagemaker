@@ -72,6 +72,18 @@ logger = logging.getLogger(__name__)
 _RETRYABLE = "RETRYABLE"
 _TERMINAL = "TERMINAL"
 
+# Downstream message types that do NOT prove the model consumed client input.
+# Everything else counts as an ack -- see _handle_payload_part_ack.
+_NON_ACK_TYPES = (
+    "Connected",        # listen.v2 / speak.v2 -- emitted at stream open
+    "Metadata",         # listen.v1 / speak.v1 -- emitted at close
+    "SessionMetadata",  # speak.v2 -- cumulative session stats, emitted at close
+    "Warning",          # speak.v2 -- e.g. NO_SYNTHESIZABLE_TEXT; no audio produced
+    "Error",
+)
+
+_NON_ACK_PATTERNS = tuple(f'"type":"{name}"' for name in _NON_ACK_TYPES)
+
 
 def compute_backoff(
     initial_s: float,
@@ -356,8 +368,17 @@ class SageMakerTransport:
         """Single connect attempt -- invokes the bidi stream and waits for the
         output stream to become available."""
 
+        # The invocation path is derived from the WebSocket URL the SDK built
+        # (see SageMakerTransportFactory), so it tracks whichever client
+        # surface was used -- v1/listen, v2/listen, v1/speak, v2/speak. Log it
+        # so a model package serving an unexpected path is visible on the
+        # first connect rather than surfacing as an opaque 4xx.
         logger.info(
-            "Connecting to SageMaker endpoint: %s in %s", self.endpoint_name, self.region
+            "Connecting to SageMaker endpoint: %s in %s (path=%s query=%s)",
+            self.endpoint_name,
+            self.region,
+            self.invocation_path,
+            self.query_string,
         )
 
         # The underlying smithy HTTP/2 stack doesn't yet expose dedicated
@@ -529,7 +550,8 @@ class SageMakerTransport:
         # `json.dumps` output (`"type": "CloseStream"`, with space) and the
         # whitespace-stripped form so this stays robust if the serializer
         # changes. Covers listen.v1/v2's `CloseStream`/`Finalize` and
-        # speak.v1's `Close` (TTS).
+        # speak.v1/v2's `Close` (Aura and Flux TTS). Note `"type":"Close"`
+        # does not match `CloseStream` -- the trailing quote anchors it.
         if isinstance(data, str):
             normalized = data.replace(" ", "")
             if (
@@ -590,16 +612,20 @@ class SageMakerTransport:
 
         Rather than enumerate every downstream message type per Deepgram
         product, invert the check: assume ANY payload counts as an ack EXCEPT
-        ``Metadata`` and ``Error`` -- both can fire at close without the
-        model having consumed input. Trusting Metadata as an ack causes
-        front-loss when the model errored before producing transcript and
-        the replay buffer is cleared prematurely.
+        the types in :data:`_NON_ACK_TYPES`, which the server can emit
+        without having consumed client input (at stream open, at close, or
+        to report a condition that produced no output). Trusting those as an
+        ack causes front-loss: the replay buffer is cleared before the model
+        has actually taken the audio or text it holds.
+
+        Whitespace is normalized before matching, mirroring ``send()``, so a
+        server that serializes with spaces (``{"type": "Metadata"}``) doesn't
+        slip past the check.
         """
-        is_close_only = text is not None and (
-            '"type":"Metadata"' in text or '"type":"Error"' in text
-        )
-        if is_close_only:
-            return
+        if text is not None:
+            normalized = text.replace(" ", "")
+            if any(pattern in normalized for pattern in _NON_ACK_PATTERNS):
+                return
         if self._retry_attempt != 0 or self._retry_window_start != 0.0 or self._retry_not_before != 0.0:
             logger.info(
                 "payload ack: data received (%dB) -> resetting retry counters "

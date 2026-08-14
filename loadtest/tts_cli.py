@@ -1,4 +1,9 @@
-"""SageMaker TTS (Aura speak.v1) load test for the Python SDK.
+"""SageMaker TTS load test for the Python SDK.
+
+Covers both TTS surfaces:
+
+- ``speak.v1`` (default) -- Aura / Aura-2 voices, e.g. ``aura-2-atlas-en``
+- ``speak.v2`` -- Flux TTS voices, e.g. ``flux-alexis-en``
 
 Mirrors the JS dg-sdk-tts-loadtest.mjs script. Per-connection flow is
 text-in, audio-out: send N sentences, send Flush, capture audio chunks
@@ -7,6 +12,9 @@ until the model emits a tail event (closed) or the await-flush timeout.
 Usage:
     python -m loadtest.tts_cli <endpoint-name> --connections 400 \
         --region us-east-2 --transcripts-dir /tmp/tts-loadtest
+
+    python -m loadtest.tts_cli <endpoint-name> --service speak.v2 \
+        --model flux-alexis-en --connections 400 --region us-east-2
 """
 
 from __future__ import annotations
@@ -22,9 +30,19 @@ from pathlib import Path
 from deepgram import AsyncDeepgramClient
 from deepgram.core.events import EventType
 from deepgram.speak.v1.types import SpeakV1Text, SpeakV1Flush, SpeakV1Close
+from deepgram.speak.v2.types import SpeakV2Speak
 from deepgram_sagemaker import SageMakerConfig, SageMakerTransportFactory
 
 logger = logging.getLogger(__name__)
+
+SERVICE_V1 = "speak.v1"
+SERVICE_V2 = "speak.v2"
+SERVICES = (SERVICE_V1, SERVICE_V2)
+
+DEFAULT_MODELS = {
+    SERVICE_V1: "aura-2-atlas-en",
+    SERVICE_V2: "flux-alexis-en",
+}
 
 DEFAULT_SENTENCES = [
     "Hello, this is a text-to-speech load test running on Amazon SageMaker.",
@@ -43,6 +61,7 @@ class TtsConnection:
         encoding: str,
         await_flush_s: float,
         max_retries: int,
+        service: str = SERVICE_V1,
     ) -> None:
         self.connection_id = connection_id
         self._client = client
@@ -50,6 +69,7 @@ class TtsConnection:
         self._encoding = encoding
         self._await_flush_s = await_flush_s
         self._max_retries = max_retries
+        self._service = service
         self.stats = {
             "active": False,
             "errored": False,
@@ -75,7 +95,14 @@ class TtsConnection:
 
         while True:
             try:
-                async with self._client.speak.v1.connect(
+                # Both surfaces expose the same connect/flush/close shape; the
+                # differences are the per-message model types below.
+                speak = (
+                    self._client.speak.v2
+                    if self._service == SERVICE_V2
+                    else self._client.speak.v1
+                )
+                async with speak.connect(
                     model=self._model, encoding=self._encoding
                 ) as connection:
                     errors: list[str] = []
@@ -111,9 +138,16 @@ class TtsConnection:
                     listen_task = asyncio.create_task(connection.start_listening())
                     await asyncio.sleep(0.5)
 
-                    for sentence in DEFAULT_SENTENCES:
-                        await connection.send_text(SpeakV1Text(text=sentence, type="Speak"))
-                    await connection.send_flush(SpeakV1Flush(type="Flush"))
+                    if self._service == SERVICE_V2:
+                        for sentence in DEFAULT_SENTENCES:
+                            await connection.send_speak(
+                                SpeakV2Speak(type="Speak", text=sentence)
+                            )
+                        await connection.send_flush()
+                    else:
+                        for sentence in DEFAULT_SENTENCES:
+                            await connection.send_text(SpeakV1Text(text=sentence, type="Speak"))
+                        await connection.send_flush(SpeakV1Flush(type="Flush"))
 
                     try:
                         await asyncio.wait_for(close_event.wait(), timeout=self._await_flush_s)
@@ -121,7 +155,10 @@ class TtsConnection:
                         pass
 
                     try:
-                        await connection.send_close(SpeakV1Close(type="Close"))
+                        if self._service == SERVICE_V2:
+                            await connection.send_close()
+                        else:
+                            await connection.send_close(SpeakV1Close(type="Close"))
                     except Exception:
                         pass
                     await asyncio.sleep(0.5)
@@ -182,13 +219,46 @@ def parse_args():
     p.add_argument("endpoint_name")
     p.add_argument("--connections", "-c", type=int, default=1)
     p.add_argument("--region", default="us-east-2")
-    p.add_argument("--model", default="aura-2-atlas-en")
+    p.add_argument(
+        "--service", default=SERVICE_V1, choices=list(SERVICES),
+        help=(
+            f"{SERVICE_V1} (default, Aura/Aura-2 TTS) or {SERVICE_V2} "
+            "(Flux turn-based TTS)"
+        ),
+    )
+    p.add_argument(
+        "--model", default=None,
+        help=(
+            f"Deepgram model (default: {DEFAULT_MODELS[SERVICE_V1]} for "
+            f"{SERVICE_V1}, {DEFAULT_MODELS[SERVICE_V2]} for {SERVICE_V2})"
+        ),
+    )
     p.add_argument("--encoding", default="linear16")
     p.add_argument("--await-flush", type=float, default=30.0)
     p.add_argument("--max-retries", type=int, default=10)
     p.add_argument("--transcripts-dir", default=None)
     p.add_argument("--log-level", default="INFO")
-    return p.parse_args()
+    args = p.parse_args()
+
+    if args.model is None:
+        args.model = DEFAULT_MODELS[args.service]
+
+    # The API rejects an Aura string on /v2/speak and a Flux string on
+    # /v1/speak. Catch the mismatch here rather than after N connections have
+    # each burned their retry budget on a terminal 4xx.
+    is_flux = args.model.startswith("flux-")
+    if args.service == SERVICE_V2 and not is_flux:
+        p.error(
+            f"--service {SERVICE_V2} requires a Flux model (flux-{{voice}}-{{language}}, "
+            f"e.g. {DEFAULT_MODELS[SERVICE_V2]}); got {args.model!r}"
+        )
+    if args.service == SERVICE_V1 and is_flux:
+        p.error(
+            f"--service {SERVICE_V1} does not accept Flux models; use "
+            f"--service {SERVICE_V2} for {args.model!r}"
+        )
+
+    return args
 
 
 async def amain():
@@ -209,6 +279,7 @@ async def amain():
     sys.stderr.write(f"Endpoint:       {args.endpoint_name}\n")
     sys.stderr.write(f"Connections:    {args.connections}\n")
     sys.stderr.write(f"Region:         {args.region}\n")
+    sys.stderr.write(f"Service:        {args.service}\n")
     sys.stderr.write(f"Model:          {args.model}\n")
     sys.stderr.write(f"Encoding:       {args.encoding}\n\n")
 
@@ -220,6 +291,7 @@ async def amain():
             encoding=args.encoding,
             await_flush_s=args.await_flush,
             max_retries=args.max_retries,
+            service=args.service,
         )
         for i in range(args.connections)
     ]

@@ -98,10 +98,48 @@ the storm-absorption logic needs another look.
 some connections finish earlier than others. Don't chase wall-clock parity
 across runs.
 
+## TTS load test
+
+`loadtest.tts_cli` is the text-in / audio-out counterpart. Per connection it
+sends a fixed set of sentences, sends `Flush`, and captures audio chunks until
+the model emits `Flushed` (or `--await-flush` elapses). There is no WER pass —
+the success signal is every connection getting audio without erroring.
+
+Aura / Aura-2 via `speak.v1` (default):
+
+```bash
+python -m loadtest.tts_cli <endpoint-name> \
+    --connections 400 \
+    --region us-east-2 \
+    --transcripts-dir /tmp/tts-loadtest
+```
+
+Flux TTS via `speak.v2`:
+
+```bash
+python -m loadtest.tts_cli <endpoint-name> \
+    --service speak.v2 \
+    --model flux-alexis-en \
+    --connections 400 \
+    --region us-east-2 \
+    --transcripts-dir /tmp/flux-tts-loadtest
+```
+
+`--model` defaults per service (`aura-2-atlas-en` for `speak.v1`,
+`flux-alexis-en` for `speak.v2`), and a service/model mismatch is rejected up
+front — the API rejects an Aura string on `/v2/speak` and vice versa, so
+there's no point letting 400 connections each burn their retry budget on a
+terminal 4xx.
+
+Output: dashboard line every 2 s, a summary table, and `tts-summary.csv` with
+`conn_id, errored, audio_chunks, audio_bytes, flushed, retries, duration_s,
+err_msg` columns in `--transcripts-dir`.
+
 ## CLI reference
 
 ```
 python -m loadtest --help
+python -m loadtest.tts_cli --help
 ```
 
 Flag-for-flag with the Java reference. Notable flags:

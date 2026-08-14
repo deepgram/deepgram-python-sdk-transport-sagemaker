@@ -218,7 +218,12 @@ class TestReplayBuffer:
 
 
 class TestPayloadAckResets:
-    """Real payloads reset retry counters and clear the replay buffer; Metadata/Error don't."""
+    """Real payloads reset retry counters and clear the replay buffer.
+
+    Types the server can emit without having consumed client input (stream
+    open, close, or a no-output condition) must not — clearing the replay
+    buffer early drops audio/text the model never took.
+    """
 
     def test_real_payload_resets_counters(self):
         t = _new_transport(1024)
@@ -257,5 +262,75 @@ class TestPayloadAckResets:
         t._retry_attempt = 1
         t._buffer_for_replay("audio", 5)
         t._handle_payload_part_ack(b"\x00\x01\x02", None)
+        assert t._retry_attempt == 0
+        assert t._replay_bytes == 0
+
+    def test_connected_does_not_count_as_ack(self):
+        """listen.v2 / speak.v2 emit Connected at stream open, before any input is consumed."""
+        t = _new_transport(1024)
+        t._retry_attempt = 2
+        t._buffer_for_replay("audio", 5)
+        t._handle_payload_part_ack(
+            b'{"type":"Connected"}', '{"type":"Connected","request_id":"abc"}'
+        )
+        assert t._retry_attempt == 2
+        assert t._replay_bytes == 5
+
+    def test_session_metadata_does_not_count_as_ack(self):
+        """speak.v2 renamed the v1 close-time Metadata message to SessionMetadata."""
+        t = _new_transport(1024)
+        t._retry_attempt = 3
+        t._buffer_for_replay("audio", 5)
+        t._handle_payload_part_ack(
+            b'{"type":"SessionMetadata"}',
+            '{"type":"SessionMetadata","total_audio_duration_ms":0}',
+        )
+        assert t._retry_attempt == 3
+        assert t._replay_bytes == 5
+
+    def test_warning_does_not_count_as_ack(self):
+        """speak.v2 NO_SYNTHESIZABLE_TEXT produces no audio, so it proves nothing."""
+        t = _new_transport(1024)
+        t._retry_attempt = 1
+        t._buffer_for_replay("audio", 5)
+        t._handle_payload_part_ack(
+            b'{"type":"Warning"}',
+            '{"type":"Warning","code":"NO_SYNTHESIZABLE_TEXT","description":"..."}',
+        )
+        assert t._retry_attempt == 1
+        assert t._replay_bytes == 5
+
+    def test_non_ack_match_tolerates_whitespace(self):
+        """A serializer that emits spaces must not slip past the check."""
+        t = _new_transport(1024)
+        t._retry_attempt = 3
+        t._buffer_for_replay("audio", 5)
+        t._handle_payload_part_ack(
+            b'{"type": "Metadata"}', '{"type": "Metadata", "duration": 0}'
+        )
+        assert t._retry_attempt == 3
+        assert t._replay_bytes == 5
+
+    def test_speech_metadata_counts_as_ack(self):
+        """speak.v2 SpeechMetadata is per-turn and follows produced audio."""
+        t = _new_transport(1024)
+        t._retry_attempt = 2
+        t._buffer_for_replay("text", 4)
+        t._handle_payload_part_ack(
+            b'{"type":"SpeechMetadata"}',
+            '{"type":"SpeechMetadata","speech_id":"s1","audio_duration_ms":1200}',
+        )
+        assert t._retry_attempt == 0
+        assert t._replay_bytes == 0
+
+    def test_turn_info_counts_as_ack(self):
+        """listen.v2 (Flux STT) TurnInfo carries transcript -- the model consumed audio."""
+        t = _new_transport(1024)
+        t._retry_attempt = 2
+        t._buffer_for_replay("audio", 5)
+        t._handle_payload_part_ack(
+            b'{"type":"TurnInfo"}',
+            '{"type":"TurnInfo","event":"EndOfTurn","transcript":"hello"}',
+        )
         assert t._retry_attempt == 0
         assert t._replay_bytes == 0

@@ -42,6 +42,76 @@ async def main():
 asyncio.run(main())
 ```
 
+## Supported surfaces
+
+The transport derives the SageMaker invocation path from the WebSocket URL the
+SDK builds, so it is path-agnostic — every streaming surface works without
+transport-specific code:
+
+| SDK call | Invocation path | Models |
+|----------|-----------------|--------|
+| `client.listen.v1.connect(...)` | `v1/listen` | Nova, Nova-3 STT |
+| `client.listen.v2.connect(...)` | `v2/listen` | Flux STT (`flux-general-en`, `flux-general-multi`) |
+| `client.speak.v1.connect(...)` | `v1/speak` | Aura, Aura-2 TTS |
+| `client.speak.v2.connect(...)` | `v2/speak` | Flux TTS (`flux-{voice}-{language}`) |
+
+The endpoint must be running the matching model package — a Flux TTS endpoint
+serves `v2/speak`, a Nova-3 STT endpoint serves `v1/listen`. The path in use is
+logged on connect at `INFO`:
+
+```
+Connecting to SageMaker endpoint: <name> in <region> (path=v2/speak query=model=flux-alexis-en)
+```
+
+**Streaming only.** `transport_factory` intercepts WebSocket `connect()` calls,
+so the REST batch endpoints — including `client.speak.v2.audio` (Flux TTS
+batch) — are not routed through this transport and remain Deepgram Cloud calls.
+
+### Flux TTS
+
+> **Requires a `deepgram-sdk` build that routes `speak.v2` through
+> `transport_factory`.** The SDK patches a fixed list of generated modules
+> (`_TARGET_MODULES` in `deepgram/transport.py`) to install a custom transport,
+> and `speak.v2` was missing from it up to and including 7.7.0. On an affected
+> SDK the failure is silent: `transport_factory` is accepted, nothing raises,
+> and `speak.v2` connects to Deepgram Cloud instead of your SageMaker endpoint.
+> Check with `"deepgram.speak.v2.client" in deepgram.transport._TARGET_MODULES`.
+
+```python
+from deepgram import AsyncDeepgramClient
+from deepgram.core.events import EventType
+from deepgram.speak.v2.types import SpeakV2Speak
+from deepgram_sagemaker import SageMakerTransportFactory
+
+factory = SageMakerTransportFactory(
+    endpoint_name="my-deepgram-flux-tts-endpoint",
+    region="us-east-2",
+)
+client = AsyncDeepgramClient(api_key="unused", transport_factory=factory)
+
+async def main():
+    async with client.speak.v2.connect(
+        model="flux-alexis-en",
+        encoding="linear16",
+        sample_rate="24000",
+    ) as connection:
+        connection.on(EventType.MESSAGE, lambda msg: print(msg))
+        asyncio.create_task(connection.start_listening())
+
+        await connection.send_speak(SpeakV2Speak(type="Speak", text="Hello from SageMaker."))
+        await connection.send_flush()
+        await asyncio.sleep(5)
+        await connection.send_close()
+```
+
+Flux TTS is turn-based: each `Speak` extends the current turn and `Flush`
+closes it, forcing out the remaining audio. Audio arrives as `bytes`; turn
+billing and timing arrive as `SpeechMetadata`, session totals as
+`SessionMetadata`. `flux-*` model strings are rejected on `v1/speak` and Aura
+strings on `v2/speak`. See
+[`examples/sagemaker_flux_tts.py`](./examples/sagemaker_flux_tts.py) for a
+complete runnable version.
+
 ## Configuration
 
 For burst-tuned timeouts and retry behavior, build a `SageMakerConfig` and pass
@@ -134,4 +204,6 @@ The transport resolves AWS credentials using boto3's credential chain:
 
 - [Deepgram Python SDK](https://github.com/deepgram/deepgram-python-sdk)
 - [SageMaker example](https://github.com/deepgram/deepgram-python-sdk/blob/main/examples/27-transcription-live-sagemaker.py)
+- [Flux TTS example](./examples/sagemaker_flux_tts.py) — `speak.v2` on SageMaker
+- [Flux STT example](./examples/sagemaker_flux.py) — `listen.v2` on SageMaker
 - [Deepgram documentation](https://developers.deepgram.com)
