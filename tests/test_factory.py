@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+import deepgram_sagemaker.transport as transport_module
 from deepgram_sagemaker import (
     SageMakerConfig,
     SageMakerTransport,
@@ -112,6 +113,48 @@ class TestSageMakerTransportInit:
         await transport.close()
         await transport.close()  # should not raise
         assert transport._closed is True
+
+    @pytest.mark.asyncio
+    async def test_connect_resolves_async_aws_config(self, monkeypatch):
+        """AWS runtime 0.11 requires asynchronously resolved configuration."""
+        captured: dict[str, object] = {}
+
+        class FakeConfig:
+            @classmethod
+            async def resolve(cls, **kwargs):
+                captured["config"] = kwargs
+                return object()
+
+        class FakeStream:
+            input_stream = object()
+
+            async def await_output(self):
+                return (None, object())
+
+        class FakeClient:
+            def __init__(self, config):
+                captured["client_config"] = config
+
+            async def invoke_endpoint_with_bidirectional_stream(self, stream_input):
+                captured["stream_input"] = stream_input
+                return FakeStream()
+
+        monkeypatch.setattr(transport_module, "AsyncSageMakerRuntimeHTTP2Config", FakeConfig)
+        monkeypatch.setattr(transport_module, "AsyncSageMakerRuntimeHTTP2Client", FakeClient)
+        config = SageMakerConfig(endpoint_name="ep", connection_timeout=12.5)
+        transport = SageMakerTransport(config, "v1/listen", "model=nova-3")
+
+        await transport._do_connect()
+
+        resolved_config = captured["config"]
+        assert captured["client_config"] is not None
+        assert resolved_config["endpoint_uri"] == "https://runtime.sagemaker.us-west-2.amazonaws.com:8443"
+        assert resolved_config["region"] == "us-west-2"
+        assert type(resolved_config["transport"]).__name__ == "AWSCRTHTTPClient"
+        assert resolved_config["http_request_config"].read_timeout == 12.5
+
+        await transport.close()
+        assert transport._client is None
 
 
 class TestExports:
