@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/compare/v0.3.0...v0.4.0) (2026-09-18)
+
+
+### Features
+
+* support SageMaker runtime HTTP2 0.11 ([#9](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/issues/9)) ([8296de3](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/commit/8296de3a86ccc2166901a9a73970dc77212431d8))
+
 ## [0.3.0](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/compare/v0.2.2...v0.3.0) (2026-06-01)
 
 High-burst hardening: a configurable `SageMakerConfig` plus internal storm absorption, so transient AWS-side failures are retried inside the transport instead of surfacing to callers. Backwards-compatible — existing `SageMakerTransportFactory(endpoint_name=..., region=...)` callers keep working and pick up the new lenient defaults.
