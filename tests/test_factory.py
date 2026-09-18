@@ -205,6 +205,43 @@ class TestSageMakerTransportInit:
         assert "client shutdown timed out" in caplog.text
         assert transport._client is None
 
+    @pytest.mark.asyncio
+    async def test_close_bounds_a_hung_input_stream_and_closes_the_client(self, monkeypatch, caplog):
+        """A stalled stream close must still release the client connection."""
+        captured: dict[str, object] = {}
+
+        class HangingInputStream:
+            async def close(self):
+                await asyncio.Event().wait()
+
+        class FakeStream:
+            input_stream = HangingInputStream()
+
+            async def await_output(self):
+                return (None, object())
+
+        class FakeClient:
+            def __init__(self, config):
+                pass
+
+            async def invoke_endpoint_with_bidirectional_stream(self, stream_input):
+                return FakeStream()
+
+            async def close(self):
+                captured["client_closed"] = True
+
+        monkeypatch.setattr(transport_module, "AsyncSageMakerRuntimeHTTP2Client", FakeClient)
+        transport = SageMakerTransport(
+            SageMakerConfig(endpoint_name="ep", connection_timeout=0.01), "v1/listen", ""
+        )
+        await transport._do_connect()
+
+        await transport.close()
+
+        assert "input stream shutdown timed out" in caplog.text
+        assert captured["client_closed"] is True
+        assert transport._client is None
+
 
 class TestExports:
     """Tests for package-level exports."""

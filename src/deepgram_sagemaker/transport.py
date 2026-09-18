@@ -654,14 +654,22 @@ class SageMakerTransport:
         self._closed = True
         self._pending.clear()
         self._clear_replay()
-        if self._stream:
-            try:
-                await self._stream.input_stream.close()
-            except Exception:
-                pass
-            # Let CRT finalize the request-body writer before closing its client.
-            await asyncio.sleep(0)
-        await self._close_client()
+        try:
+            if self._stream:
+                try:
+                    await asyncio.wait_for(
+                        self._stream.input_stream.close(),
+                        timeout=self._config.connection_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("close: input stream shutdown timed out")
+                except Exception as exc:
+                    logger.warning("close: input stream shutdown failed: %s", _summarize(exc))
+                else:
+                    # Let CRT finalize the request-body writer before closing its client.
+                    await asyncio.sleep(0)
+        finally:
+            await self._close_client()
         logger.info("Closed SageMaker connection: %s", self.endpoint_name)
 
 
