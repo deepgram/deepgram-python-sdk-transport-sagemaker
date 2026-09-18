@@ -85,7 +85,10 @@ async def main():
 
         close_sent = True
         await connection.send_close_stream()
-        await asyncio.wait_for(listen_task, timeout=30)
+        try:
+            await asyncio.wait_for(listen_task, timeout=30)
+        except asyncio.TimeoutError:
+            raise SystemExit("Timed out waiting 30 seconds for final transcripts") from None
 
     print("Done.")
 
