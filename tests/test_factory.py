@@ -155,6 +155,56 @@ class TestSageMakerTransportInit:
         assert captured["client_closed"] is True
         assert transport._client is None
 
+    @pytest.mark.asyncio
+    async def test_connect_cleanup_preserves_setup_error_when_client_close_fails(self, monkeypatch, caplog):
+        """Client-close failures must not mask the setup failure that triggered cleanup."""
+
+        class FailingClient:
+            def __init__(self, config):
+                pass
+
+            async def invoke_endpoint_with_bidirectional_stream(self, stream_input):
+                raise RuntimeError("stream setup failed")
+
+            async def close(self):
+                raise RuntimeError("client close failed")
+
+        monkeypatch.setattr(transport_module, "AsyncSageMakerRuntimeHTTP2Client", FailingClient)
+        transport = SageMakerTransport(
+            SageMakerConfig(endpoint_name="ep", connection_timeout=0.01), "v1/listen", ""
+        )
+
+        with pytest.raises(RuntimeError, match="stream setup failed"):
+            await transport._do_connect()
+
+        assert "client shutdown failed" in caplog.text
+        assert transport._client is None
+
+    @pytest.mark.asyncio
+    async def test_connect_cleanup_bounds_a_hung_client_close(self, monkeypatch, caplog):
+        """A stalled client close must not prevent the original setup error from surfacing."""
+
+        class HangingCloseClient:
+            def __init__(self, config):
+                pass
+
+            async def invoke_endpoint_with_bidirectional_stream(self, stream_input):
+                raise RuntimeError("stream setup failed")
+
+            async def close(self):
+                await asyncio.Event().wait()
+
+        monkeypatch.setattr(transport_module, "AsyncSageMakerRuntimeHTTP2Client", HangingCloseClient)
+        transport = SageMakerTransport(
+            SageMakerConfig(endpoint_name="ep", connection_timeout=0.01), "v1/listen", ""
+        )
+
+        with pytest.raises(RuntimeError, match="stream setup failed"):
+            await transport._do_connect()
+
+        assert "client shutdown timed out" in caplog.text
+        assert transport._client is None
+
 
 class TestExports:
     """Tests for package-level exports."""

@@ -379,6 +379,7 @@ class SageMakerTransport:
             ),
         )
         client = AsyncSageMakerRuntimeHTTP2Client(config=config)
+        self._client = client
         try:
             stream_input = InvokeEndpointWithBidirectionalStreamInput(
                 endpoint_name=self.endpoint_name,
@@ -413,12 +414,10 @@ class SageMakerTransport:
                 event = self._pending.popleft()
                 await self._stream.input_stream.send(event)
         except BaseException:
-            await client.close()
+            await self._close_client()
             self._stream = None
             self._output_stream = None
             raise
-
-        self._client = client
 
         logger.info("Connected to SageMaker endpoint: %s", self.endpoint_name)
 
@@ -512,7 +511,11 @@ class SageMakerTransport:
         self._client = None
         if client is not None:
             try:
-                await client.close()
+                await asyncio.wait_for(
+                    client.close(), timeout=self._config.connection_timeout
+                )
+            except asyncio.TimeoutError:
+                logger.warning("close: client shutdown timed out; connection abandoned")
             except Exception as exc:
                 logger.warning("close: client shutdown failed: %s", _summarize(exc))
 
@@ -658,13 +661,7 @@ class SageMakerTransport:
                 pass
             # Let CRT finalize the request-body writer before closing its client.
             await asyncio.sleep(0)
-        try:
-            await asyncio.wait_for(
-                self._close_client(), timeout=self._config.connection_timeout
-            )
-        except asyncio.TimeoutError:
-            logger.warning("close: client shutdown timed out; connection abandoned")
-            self._client = None
+        await self._close_client()
         logger.info("Closed SageMaker connection: %s", self.endpoint_name)
 
 
