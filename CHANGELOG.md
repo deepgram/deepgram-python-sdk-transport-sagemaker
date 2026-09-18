@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.0](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/compare/v0.4.0...v0.5.0) (2026-09-18)
+
+
+### Features
+
+* configurable timeouts and storm absorption for high-burst workloads ([#6](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/issues/6)) ([f2925fc](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/commit/f2925fcea84f8575a20cb30f0bef818b4c9b262d))
+* initial deepgram-sagemaker transport package ([8ff6a7d](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/commit/8ff6a7d37f25c5a1226144fb65ca953af0819bec))
+* support SageMaker runtime HTTP2 0.11 ([#9](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/issues/9)) ([8296de3](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/commit/8296de3a86ccc2166901a9a73970dc77212431d8))
+
+
+### Bug Fixes
+
+* live mic example display issues ([#4](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/issues/4)) ([150217a](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/commit/150217a0db84e768b50295b543f68ddf09991335))
+* TTS support and transport improvements ([#2](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/issues/2)) ([1f9d19f](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/commit/1f9d19fd078883fe8341b8b4cc94bc20c31a6251))
+
 ## [0.4.0](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/compare/v0.3.0...v0.4.0) (2026-09-18)
 
 Updates the SageMaker transport for AWS runtime HTTP2 `0.11`. Existing `SageMakerTransportFactory(endpoint_name=..., region=...)` usage remains unchanged.
