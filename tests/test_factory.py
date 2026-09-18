@@ -242,6 +242,52 @@ class TestSageMakerTransportInit:
         assert captured["client_closed"] is True
         assert transport._client is None
 
+    @pytest.mark.asyncio
+    async def test_close_logs_input_stream_failure_and_closes_the_client(self, caplog):
+        """An input stream close error must not prevent client cleanup."""
+        captured: dict[str, object] = {}
+
+        class FailingInputStream:
+            async def close(self):
+                raise RuntimeError("input close failed")
+
+        class FakeStream:
+            input_stream = FailingInputStream()
+
+        class FakeClient:
+            async def close(self):
+                captured["client_closed"] = True
+
+        transport = SageMakerTransport(SageMakerConfig(endpoint_name="ep"), "v1/listen", "")
+        transport._stream = FakeStream()
+        transport._client = FakeClient()
+
+        await transport.close()
+
+        assert "input stream shutdown failed" in caplog.text
+        assert captured["client_closed"] is True
+        assert transport._client is None
+
+    @pytest.mark.asyncio
+    async def test_retry_reset_closes_and_clears_the_client(self):
+        """A retryable error must release the client before the next connection attempt."""
+        captured: dict[str, object] = {}
+
+        class FakeClient:
+            async def close(self):
+                captured["client_closed"] = True
+
+        transport = SageMakerTransport(SageMakerConfig(endpoint_name="ep"), "v1/listen", "")
+        transport._stream = object()
+        transport._output_stream = object()
+        transport._client = FakeClient()
+
+        assert await transport._handle_retryable_error(ConnectionError("connection lost")) is True
+        assert captured["client_closed"] is True
+        assert transport._client is None
+        assert transport._stream is None
+        assert transport._output_stream is None
+
 
 class TestExports:
     """Tests for package-level exports."""
