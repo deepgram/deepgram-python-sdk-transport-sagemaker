@@ -513,8 +513,8 @@ class SageMakerTransport:
         if client is not None:
             try:
                 await client.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("close: client shutdown failed: %s", _summarize(exc))
 
     async def send(self, data: Any) -> None:
         """Send text, bytes, or dict data to SageMaker.
@@ -656,10 +656,15 @@ class SageMakerTransport:
                 await self._stream.input_stream.close()
             except Exception:
                 pass
-        # CRT finalizes the request-body writer after the publisher closes.
-        # Releasing the client lets that task finish without racing its
-        # end-stream frame against connection teardown.
-        self._client = None
+            # Let CRT finalize the request-body writer before closing its client.
+            await asyncio.sleep(0)
+        try:
+            await asyncio.wait_for(
+                self._close_client(), timeout=self._config.connection_timeout
+            )
+        except asyncio.TimeoutError:
+            logger.warning("close: client shutdown timed out; connection abandoned")
+            self._client = None
         logger.info("Closed SageMaker connection: %s", self.endpoint_name)
 
 

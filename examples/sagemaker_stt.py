@@ -85,7 +85,7 @@ async def main():
 
         close_sent = True
         await connection.send_close_stream()
-        await listen_task
+        await asyncio.wait_for(listen_task, timeout=30)
 
     print("Done.")
 

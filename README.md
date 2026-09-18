@@ -11,10 +11,12 @@ SageMaker transport for the [Deepgram Python SDK](https://github.com/deepgram/de
 ## Installation
 
 ```bash
-pip install deepgram-sagemaker
+pip install "deepgram-sdk>=7.8.1,<8.0.0" deepgram-sagemaker
 ```
 
-This installs `aws-sdk-sagemaker-runtime-http2` and `boto3` automatically.
+`deepgram-sagemaker` installs `aws-sdk-sagemaker-runtime-http2` 0.11.x with its
+`awscrt` extra, plus `boto3`. `awscrt` uses a compiled extension; supported
+platforms install a wheel, while source builds require a C toolchain.
 
 ## Usage
 

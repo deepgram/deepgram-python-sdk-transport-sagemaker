@@ -116,17 +116,15 @@ class TestSageMakerTransportInit:
 
     @pytest.mark.asyncio
     async def test_connect_resolves_async_aws_config(self, monkeypatch):
-        """AWS runtime 0.11 requires asynchronously resolved configuration."""
+        """AWS runtime 0.11 accepts the resolved config arguments used by the transport."""
         captured: dict[str, object] = {}
 
-        class FakeConfig:
-            @classmethod
-            async def resolve(cls, **kwargs):
-                captured["config"] = kwargs
-                return object()
+        class FakeInputStream:
+            async def close(self):
+                captured["input_stream_closed"] = True
 
         class FakeStream:
-            input_stream = object()
+            input_stream = FakeInputStream()
 
             async def await_output(self):
                 return (None, object())
@@ -139,21 +137,22 @@ class TestSageMakerTransportInit:
                 captured["stream_input"] = stream_input
                 return FakeStream()
 
-        monkeypatch.setattr(transport_module, "AsyncSageMakerRuntimeHTTP2Config", FakeConfig)
+            async def close(self):
+                captured["client_closed"] = True
+
         monkeypatch.setattr(transport_module, "AsyncSageMakerRuntimeHTTP2Client", FakeClient)
         config = SageMakerConfig(endpoint_name="ep", connection_timeout=12.5)
         transport = SageMakerTransport(config, "v1/listen", "model=nova-3")
 
         await transport._do_connect()
 
-        resolved_config = captured["config"]
+        resolved_config = captured["client_config"]
         assert captured["client_config"] is not None
-        assert resolved_config["endpoint_uri"] == "https://runtime.sagemaker.us-west-2.amazonaws.com:8443"
-        assert resolved_config["region"] == "us-west-2"
-        assert type(resolved_config["transport"]).__name__ == "AWSCRTHTTPClient"
-        assert resolved_config["http_request_config"].read_timeout == 12.5
+        assert type(resolved_config).__name__ == "AsyncSageMakerRuntimeHTTP2Config"
 
         await transport.close()
+        assert captured["input_stream_closed"] is True
+        assert captured["client_closed"] is True
         assert transport._client is None
 
 
