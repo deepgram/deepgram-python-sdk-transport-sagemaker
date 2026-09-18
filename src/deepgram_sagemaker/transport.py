@@ -53,8 +53,8 @@ from collections import deque
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from aws_sdk_sagemaker_runtime_http2.client import SageMakerRuntimeHTTP2Client
-from aws_sdk_sagemaker_runtime_http2.config import Config, HTTPAuthSchemeResolver
+from aws_sdk_sagemaker_runtime_http2.client import AsyncSageMakerRuntimeHTTP2Client
+from aws_sdk_sagemaker_runtime_http2.config import AsyncSageMakerRuntimeHTTP2Config, HTTPAuthSchemeResolver
 from aws_sdk_sagemaker_runtime_http2.models import (
     InvokeEndpointWithBidirectionalStreamInput,
     RequestPayloadPart,
@@ -62,6 +62,7 @@ from aws_sdk_sagemaker_runtime_http2.models import (
 )
 from smithy_aws_core.auth.sigv4 import SigV4AuthScheme
 from smithy_aws_core.identity import EnvironmentCredentialsResolver
+from smithy_http.aio.crt import AWSCRTHTTPClient
 from smithy_http.interfaces import HTTPRequestConfiguration
 
 from .config import SageMakerConfig
@@ -203,6 +204,7 @@ class SageMakerTransport:
         self.region = config.region
         self.invocation_path = invocation_path
         self.query_string = query_string
+        self._client: Any = None
         self._stream: Any = None
         self._output_stream: Any = None
         self._connected = False
@@ -365,50 +367,60 @@ class SageMakerTransport:
         # is request-level read_timeout. Map subscription_timeout to that --
         # all three configured timeouts apply to roughly "how long are we
         # willing to wait before declaring this attempt failed."
-        config = Config(
+        config = await AsyncSageMakerRuntimeHTTP2Config.resolve(
             endpoint_uri=f"https://runtime.sagemaker.{self.region}.amazonaws.com:8443",
             region=self.region,
             aws_credentials_identity_resolver=EnvironmentCredentialsResolver(),
             auth_scheme_resolver=HTTPAuthSchemeResolver(),
             auth_schemes={"aws.auth#sigv4": SigV4AuthScheme(service="sagemaker")},
+            transport=AWSCRTHTTPClient(),
             http_request_config=HTTPRequestConfiguration(
                 read_timeout=self._config.connection_timeout,
             ),
         )
-        client = SageMakerRuntimeHTTP2Client(config=config)
-
-        stream_input = InvokeEndpointWithBidirectionalStreamInput(
-            endpoint_name=self.endpoint_name,
-            model_invocation_path=self.invocation_path,
-            model_query_string=self.query_string,
-        )
-
-        self._stream = await client.invoke_endpoint_with_bidirectional_stream(
-            stream_input
-        )
-
-        output = await asyncio.wait_for(
-            self._stream.await_output(), timeout=self._config.subscription_timeout
-        )
-        self._output_stream = output[1]
-
-        # Drain replay buffer onto the new stream so audio sent on a prior
-        # rejected attempt isn't lost.
-        if self._replay:
-            count = len(self._replay)
-            logger.info(
-                "do_connect: replaying %d buffered events (%d bytes) onto new stream",
-                count,
-                self._replay_bytes,
+        client = AsyncSageMakerRuntimeHTTP2Client(config=config)
+        self._client = client
+        if self._closed:
+            await self._close_client()
+            raise RuntimeError("Transport is closed")
+        try:
+            stream_input = InvokeEndpointWithBidirectionalStreamInput(
+                endpoint_name=self.endpoint_name,
+                model_invocation_path=self.invocation_path,
+                model_query_string=self.query_string,
             )
-            for be in list(self._replay):
-                await self._stream.input_stream.send(be.event)
 
-        # Drain anything queued before this attempt (e.g. sends issued while
-        # _connect_lock was held by a previous attempt that failed).
-        while self._pending:
-            event = self._pending.popleft()
-            await self._stream.input_stream.send(event)
+            self._stream = await client.invoke_endpoint_with_bidirectional_stream(
+                stream_input
+            )
+
+            output = await asyncio.wait_for(
+                self._stream.await_output(), timeout=self._config.subscription_timeout
+            )
+            self._output_stream = output[1]
+
+            # Drain replay buffer onto the new stream so audio sent on a prior
+            # rejected attempt isn't lost.
+            if self._replay:
+                count = len(self._replay)
+                logger.info(
+                    "do_connect: replaying %d buffered events (%d bytes) onto new stream",
+                    count,
+                    self._replay_bytes,
+                )
+                for be in list(self._replay):
+                    await self._stream.input_stream.send(be.event)
+
+            # Drain anything queued before this attempt (e.g. sends issued while
+            # _connect_lock was held by a previous attempt that failed).
+            while self._pending:
+                event = self._pending.popleft()
+                await self._stream.input_stream.send(event)
+        except BaseException:
+            await self._close_client()
+            self._stream = None
+            self._output_stream = None
+            raise
 
         logger.info("Connected to SageMaker endpoint: %s", self.endpoint_name)
 
@@ -435,7 +447,7 @@ class SageMakerTransport:
         self._replay.clear()
         self._replay_bytes = 0
 
-    def _handle_retryable_error(self, exc: BaseException) -> bool:
+    async def _handle_retryable_error(self, exc: BaseException) -> bool:
         """Process a runtime error and decide whether to reset the stream.
 
         Returns True if the error was classified as RETRYABLE and budget
@@ -491,8 +503,24 @@ class SageMakerTransport:
             backoff,
         )
         self._connected = False
+        self._stream = None
         self._output_stream = None
+        await self._close_client()
         return True
+
+    async def _close_client(self) -> None:
+        """Close the AWS client that owns the HTTP session for this stream."""
+        client = self._client
+        self._client = None
+        if client is not None:
+            try:
+                await asyncio.wait_for(
+                    client.close(), timeout=self._config.connection_timeout
+                )
+            except asyncio.TimeoutError:
+                logger.warning("close: client shutdown timed out; connection abandoned")
+            except Exception as exc:
+                logger.warning("close: client shutdown failed: %s", _summarize(exc))
 
     async def send(self, data: Any) -> None:
         """Send text, bytes, or dict data to SageMaker.
@@ -546,7 +574,7 @@ class SageMakerTransport:
                 self._buffer_for_replay(event, len(raw))
                 return
             except BaseException as exc:  # noqa: BLE001 -- classified below
-                if not self._handle_retryable_error(exc):
+                if not await self._handle_retryable_error(exc):
                     raise
 
     async def recv(self) -> Any:
@@ -564,7 +592,7 @@ class SageMakerTransport:
             try:
                 result = await self._output_stream.receive()
             except BaseException as exc:  # noqa: BLE001 -- classified below
-                if self._handle_retryable_error(exc):
+                if await self._handle_retryable_error(exc):
                     continue
                 raise
 
@@ -629,11 +657,21 @@ class SageMakerTransport:
         self._closed = True
         self._pending.clear()
         self._clear_replay()
-        if self._stream:
-            try:
-                await self._stream.input_stream.close()
-            except Exception:
-                pass
+        try:
+            if self._stream:
+                try:
+                    await asyncio.wait_for(
+                        self._stream.input_stream.close(),
+                        timeout=self._config.connection_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("close: input stream shutdown timed out")
+                except Exception as exc:
+                    logger.warning("close: input stream shutdown failed: %s", _summarize(exc))
+                # Let CRT finalize or cancel the request-body writer before closing its client.
+                await asyncio.sleep(0)
+        finally:
+            await self._close_client()
         logger.info("Closed SageMaker connection: %s", self.endpoint_name)
 
 

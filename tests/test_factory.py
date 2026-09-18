@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+import deepgram_sagemaker.transport as transport_module
 from deepgram_sagemaker import (
     SageMakerConfig,
     SageMakerTransport,
@@ -112,6 +113,221 @@ class TestSageMakerTransportInit:
         await transport.close()
         await transport.close()  # should not raise
         assert transport._closed is True
+
+    @pytest.mark.asyncio
+    async def test_connect_resolves_async_aws_config(self, monkeypatch):
+        """AWS runtime 0.11 accepts the resolved config arguments used by the transport."""
+        captured: dict[str, object] = {}
+
+        class FakeInputStream:
+            async def close(self):
+                captured["input_stream_closed"] = True
+
+        class FakeStream:
+            input_stream = FakeInputStream()
+
+            async def await_output(self):
+                return (None, object())
+
+        class FakeClient:
+            def __init__(self, config):
+                captured["client_config"] = config
+
+            async def invoke_endpoint_with_bidirectional_stream(self, stream_input):
+                captured["stream_input"] = stream_input
+                return FakeStream()
+
+            async def close(self):
+                captured["client_closed"] = True
+
+        monkeypatch.setattr(transport_module, "AsyncSageMakerRuntimeHTTP2Client", FakeClient)
+        config = SageMakerConfig(endpoint_name="ep", connection_timeout=12.5)
+        transport = SageMakerTransport(config, "v1/listen", "model=nova-3")
+
+        await transport._do_connect()
+
+        resolved_config = captured["client_config"]
+        assert captured["client_config"] is not None
+        assert type(resolved_config).__name__ == "AsyncSageMakerRuntimeHTTP2Config"
+        assert resolved_config.endpoint_uri == "https://runtime.sagemaker.us-west-2.amazonaws.com:8443"
+        assert resolved_config.region == "us-west-2"
+        assert type(resolved_config.transport).__name__ == "AWSCRTHTTPClient"
+        assert resolved_config.http_request_config.read_timeout == 12.5
+
+        await transport.close()
+        assert captured["input_stream_closed"] is True
+        assert captured["client_closed"] is True
+        assert transport._client is None
+
+    @pytest.mark.asyncio
+    async def test_connect_cleanup_preserves_setup_error_when_client_close_fails(self, monkeypatch, caplog):
+        """Client-close failures must not mask the setup failure that triggered cleanup."""
+
+        class FailingClient:
+            def __init__(self, config):
+                pass
+
+            async def invoke_endpoint_with_bidirectional_stream(self, stream_input):
+                raise RuntimeError("stream setup failed")
+
+            async def close(self):
+                raise RuntimeError("client close failed")
+
+        monkeypatch.setattr(transport_module, "AsyncSageMakerRuntimeHTTP2Client", FailingClient)
+        transport = SageMakerTransport(
+            SageMakerConfig(endpoint_name="ep", connection_timeout=0.01), "v1/listen", ""
+        )
+
+        with pytest.raises(RuntimeError, match="stream setup failed"):
+            await asyncio.wait_for(transport._do_connect(), timeout=0.1)
+
+        assert "client shutdown failed" in caplog.text
+        assert transport._client is None
+
+    @pytest.mark.asyncio
+    async def test_connect_cleanup_bounds_a_hung_client_close(self, monkeypatch, caplog):
+        """A stalled client close must not prevent the original setup error from surfacing."""
+
+        class HangingCloseClient:
+            def __init__(self, config):
+                pass
+
+            async def invoke_endpoint_with_bidirectional_stream(self, stream_input):
+                raise RuntimeError("stream setup failed")
+
+            async def close(self):
+                await asyncio.Event().wait()
+
+        monkeypatch.setattr(transport_module, "AsyncSageMakerRuntimeHTTP2Client", HangingCloseClient)
+        transport = SageMakerTransport(
+            SageMakerConfig(endpoint_name="ep", connection_timeout=0.01), "v1/listen", ""
+        )
+
+        with pytest.raises(RuntimeError, match="stream setup failed"):
+            await asyncio.wait_for(transport._do_connect(), timeout=0.1)
+
+        assert "client shutdown timed out" in caplog.text
+        assert transport._client is None
+
+    @pytest.mark.asyncio
+    async def test_close_bounds_a_hung_input_stream_and_closes_the_client(self, monkeypatch, caplog):
+        """A stalled stream close must still release the client connection."""
+        captured: dict[str, object] = {}
+
+        class HangingInputStream:
+            async def close(self):
+                await asyncio.Event().wait()
+
+        class FakeStream:
+            input_stream = HangingInputStream()
+
+            async def await_output(self):
+                return (None, object())
+
+        class FakeClient:
+            def __init__(self, config):
+                pass
+
+            async def invoke_endpoint_with_bidirectional_stream(self, stream_input):
+                return FakeStream()
+
+            async def close(self):
+                captured["client_closed"] = True
+
+        monkeypatch.setattr(transport_module, "AsyncSageMakerRuntimeHTTP2Client", FakeClient)
+        transport = SageMakerTransport(
+            SageMakerConfig(endpoint_name="ep", connection_timeout=0.01), "v1/listen", ""
+        )
+        await transport._do_connect()
+
+        await asyncio.wait_for(transport.close(), timeout=0.1)
+
+        assert "input stream shutdown timed out" in caplog.text
+        assert captured["client_closed"] is True
+        assert transport._client is None
+
+    @pytest.mark.asyncio
+    async def test_connect_closes_a_client_constructed_after_transport_close(self, monkeypatch):
+        """A close during config resolution must release the client constructed afterwards."""
+        resolve_started = asyncio.Event()
+        finish_resolve = asyncio.Event()
+        captured: dict[str, object] = {}
+
+        class SlowConfig:
+            @classmethod
+            async def resolve(cls, **kwargs):
+                resolve_started.set()
+                await finish_resolve.wait()
+                return object()
+
+        class FakeClient:
+            def __init__(self, config):
+                captured["client_created"] = True
+
+            async def close(self):
+                captured["client_closed"] = True
+
+        monkeypatch.setattr(transport_module, "AsyncSageMakerRuntimeHTTP2Config", SlowConfig)
+        monkeypatch.setattr(transport_module, "AsyncSageMakerRuntimeHTTP2Client", FakeClient)
+        transport = SageMakerTransport(SageMakerConfig(endpoint_name="ep"), "v1/listen", "")
+        connect = asyncio.create_task(transport._do_connect())
+        await resolve_started.wait()
+
+        await transport.close()
+        finish_resolve.set()
+
+        with pytest.raises(RuntimeError, match="Transport is closed"):
+            await connect
+
+        assert captured["client_created"] is True
+        assert captured["client_closed"] is True
+        assert transport._client is None
+
+    @pytest.mark.asyncio
+    async def test_close_logs_input_stream_failure_and_closes_the_client(self, caplog):
+        """An input stream close error must not prevent client cleanup."""
+        captured: dict[str, object] = {}
+
+        class FailingInputStream:
+            async def close(self):
+                raise RuntimeError("input close failed")
+
+        class FakeStream:
+            input_stream = FailingInputStream()
+
+        class FakeClient:
+            async def close(self):
+                captured["client_closed"] = True
+
+        transport = SageMakerTransport(SageMakerConfig(endpoint_name="ep"), "v1/listen", "")
+        transport._stream = FakeStream()
+        transport._client = FakeClient()
+
+        await transport.close()
+
+        assert "input stream shutdown failed" in caplog.text
+        assert captured["client_closed"] is True
+        assert transport._client is None
+
+    @pytest.mark.asyncio
+    async def test_retry_reset_closes_and_clears_the_client(self):
+        """A retryable error must release the client before the next connection attempt."""
+        captured: dict[str, object] = {}
+
+        class FakeClient:
+            async def close(self):
+                captured["client_closed"] = True
+
+        transport = SageMakerTransport(SageMakerConfig(endpoint_name="ep"), "v1/listen", "")
+        transport._stream = object()
+        transport._output_stream = object()
+        transport._client = FakeClient()
+
+        assert await transport._handle_retryable_error(ConnectionError("connection lost")) is True
+        assert captured["client_closed"] is True
+        assert transport._client is None
+        assert transport._stream is None
+        assert transport._output_stream is None
 
 
 class TestExports:

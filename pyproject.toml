@@ -32,10 +32,11 @@ Repository = 'https://github.com/deepgram/deepgram-python-sdk-transport-sagemake
 
 [tool.poetry.dependencies]
 python = "^3.12"
-aws-sdk-sagemaker-runtime-http2 = "*"
+aws-sdk-sagemaker-runtime-http2 = { version = "^0.11", extras = ["awscrt"] }
 boto3 = "*"
 
 [tool.poetry.group.dev.dependencies]
+deepgram-sdk = "^7.8.1"
 mypy = "==1.13.0"
 pytest = "^7.4.0"
 pytest-asyncio = "^0.23.5"
