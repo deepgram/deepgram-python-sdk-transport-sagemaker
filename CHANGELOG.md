@@ -2,10 +2,13 @@
 
 ## [0.4.0](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/compare/v0.3.0...v0.4.0) (2026-09-18)
 
+Updates the SageMaker transport for AWS runtime HTTP2 `0.11`. Existing `SageMakerTransportFactory(endpoint_name=..., region=...)` usage remains unchanged.
 
 ### Features
 
-* support SageMaker runtime HTTP2 0.11 ([#9](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/issues/9)) ([8296de3](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/commit/8296de3a86ccc2166901a9a73970dc77212431d8))
+* Use the runtime HTTP2 `0.11` async client and resolved configuration API, restoring SageMaker streaming for installations that resolve the current AWS runtime package. ([#9](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/issues/9)) ([8296de3](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/commit/8296de3a86ccc2166901a9a73970dc77212431d8))
+* Install the required `awscrt` extra and configure its HTTP/2 client for bidirectional SageMaker streaming. `awscrt` uses a compiled extension: supported platforms install a wheel; source builds require a C toolchain. ([#9](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/issues/9)) ([8296de3](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/commit/8296de3a86ccc2166901a9a73970dc77212431d8))
+* Close AWS clients during connection setup, retry resets, and transport shutdown. The STT example now waits up to 30 seconds for final transcripts before exiting. ([#9](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/issues/9)) ([8296de3](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/commit/8296de3a86ccc2166901a9a73970dc77212431d8))
 
 ## [0.3.0](https://github.com/deepgram/deepgram-python-sdk-transport-sagemaker/compare/v0.2.2...v0.3.0) (2026-06-01)
 
